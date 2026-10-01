@@ -95,3 +95,44 @@ export interface UpdateModelInput {
   pricing_json?: Record<string, any> | null;
 }
 
+export interface ModelContextData {
+  brand?: string | null;
+  product?: string | null;
+  offer?: string | null;
+  cta?: string | null;
+  summary?: string | null;
+}
+
+export interface InferenceRun {
+  id: string;
+  asset_id: string;
+  model_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  text?: string | null;
+  context?: ModelContextData | null;
+  response_text?: string | null;
+  context_json?: ModelContextData | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  latency_ms?: number | null;
+  ttft_ms?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  estimated_cost_usd?: number | null;
+  error_message?: string | null;
+  created_at: string;
+  model_name?: string | null;
+  model_key?: string | null;
+  provider?: string | null;
+}
+
+export interface CampaignRunSummary {
+  campaign_id: string;
+  assets: number;
+  enabled_models: number;
+  runs_created: number;
+  successful_runs?: number | null;
+  failed_runs?: number | null;
+}
+
+

@@ -2,12 +2,15 @@ import type {
   Asset,
   AssetFramesResponse,
   Campaign,
+  CampaignRunSummary,
   CreateModelInput,
   HealthStatus,
+  InferenceRun,
   MediaProcessing,
   Model,
   UpdateModelInput,
 } from '../types';
+
 
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -200,4 +203,57 @@ export async function disableModel(modelId: string): Promise<Model> {
   }
   return response.json();
 }
+
+export async function inferAsset(
+  assetId: string,
+  modelId: string,
+  prompt?: string
+): Promise<InferenceRun> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/infer/${modelId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: prompt || null }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Inference failed (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function getAssetInferenceRuns(assetId: string): Promise<InferenceRun[]> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/inference-runs`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch inference runs (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function getInferenceRun(runId: string): Promise<InferenceRun> {
+  const response = await fetch(`${API_BASE_URL}/inference-runs/${runId}`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch inference run (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function runCampaignPipeline(
+  campaignId: string,
+  prompt?: string,
+  maxWorkers: number = 3
+): Promise<CampaignRunSummary> {
+  const response = await fetch(`${API_BASE_URL}/campaigns/${campaignId}/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: prompt || null, max_workers: maxWorkers }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Pipeline run failed (${response.status})`);
+  }
+  return response.json();
+}
+
 

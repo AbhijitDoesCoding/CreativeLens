@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import type { Asset, Campaign, FrameInfo, MediaProcessing } from '../types';
+import type {
+  Asset,
+  Campaign,
+  CampaignRunSummary,
+  FrameInfo,
+  InferenceRun,
+  MediaProcessing,
+  Model,
+} from '../types';
 import {
   getAssetFileUrl,
   getAssetFrames,
+  getAssetInferenceRuns,
   getAssetProcessing,
   getFrameUrl,
+  getModels,
+  inferAsset,
   processAsset,
+  runCampaignPipeline,
 } from '../services/api';
 
 interface CampaignDetailsProps {
@@ -53,33 +65,53 @@ export function CampaignDetails({
   const [videoFramesMap, setVideoFramesMap] = useState<Record<string, FrameInfo[]>>({});
   const [expandedGallery, setExpandedGallery] = useState<Record<string, boolean>>({});
 
-  // Fetch processing status for assets on load
-  useEffect(() => {
-    if (assets.length === 0) return;
+  // Models & Inference states
+  const [enabledModels, setEnabledModels] = useState<Model[]>([]);
+  const [inferenceRunsMap, setInferenceRunsMap] = useState<Record<string, InferenceRun[]>>({});
+  const [inferringMap, setInferringMap] = useState<Record<string, boolean>>({});
+  const [pipelineRunning, setPipelineRunning] = useState<boolean>(false);
+  const [pipelineSummary, setPipelineSummary] = useState<CampaignRunSummary | null>(null);
+  const [selectedModelForAsset, setSelectedModelForAsset] = useState<Record<string, string>>({});
+  const [expandedInference, setExpandedInference] = useState<Record<string, boolean>>({});
 
-    let isMounted = true;
-    assets.forEach((asset) => {
+  // Fetch enabled models on mount
+  useEffect(() => {
+    getModels(true)
+      .then((models) => setEnabledModels(models))
+      .catch(() => {});
+  }, []);
+
+  // Fetch processing status and inference runs for assets on load
+  const loadAssetDetails = (assetList: Asset[]) => {
+    assetList.forEach((asset) => {
+      // 1. Processing info
       getAssetProcessing(asset.id)
         .then((record) => {
-          if (isMounted && record) {
+          if (record) {
             setProcessingMap((prev) => ({ ...prev, [asset.id]: record }));
             if (record.media_type === 'video' && record.status === 'completed') {
               getAssetFrames(asset.id)
                 .then((res) => {
-                  if (isMounted) {
-                    setVideoFramesMap((prev) => ({ ...prev, [asset.id]: res.frames }));
-                  }
+                  setVideoFramesMap((prev) => ({ ...prev, [asset.id]: res.frames }));
                 })
                 .catch(() => {});
             }
           }
         })
         .catch(() => {});
-    });
 
-    return () => {
-      isMounted = false;
-    };
+      // 2. Inference runs
+      getAssetInferenceRuns(asset.id)
+        .then((runs) => {
+          setInferenceRunsMap((prev) => ({ ...prev, [asset.id]: runs }));
+        })
+        .catch(() => {});
+    });
+  };
+
+  useEffect(() => {
+    if (assets.length === 0) return;
+    loadAssetDetails(assets);
   }, [assets]);
 
   const handleFilesSelected = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -108,30 +140,90 @@ export function CampaignDetails({
     try {
       setProcessingLoading((prev) => ({ ...prev, [asset.id]: true }));
       setError(null);
+      const updated = await processAsset(asset.id, 1.0, force);
+      setProcessingMap((prev) => ({ ...prev, [asset.id]: updated }));
 
-      const result = await processAsset(asset.id, 1.0, force);
-      setProcessingMap((prev) => ({ ...prev, [asset.id]: result }));
-
-      // If video, also fetch extracted frames
-      if (result.media_type === 'video' && result.status === 'completed') {
+      if (asset.media_type === 'video' && updated.status === 'completed') {
         const framesRes = await getAssetFrames(asset.id);
         setVideoFramesMap((prev) => ({ ...prev, [asset.id]: framesRes.frames }));
-        setExpandedGallery((prev) => ({ ...prev, [asset.id]: true }));
       }
     } catch (err: unknown) {
       if (err instanceof Error) {
-        setError(`Processing failed: ${err.message}`);
+        setError(err.message);
       } else {
-        setError('Failed to process asset');
+        setError('Media processing failed');
       }
     } finally {
       setProcessingLoading((prev) => ({ ...prev, [asset.id]: false }));
     }
   };
 
+  const handleRunPipeline = async () => {
+    try {
+      setPipelineRunning(true);
+      setError(null);
+      setPipelineSummary(null);
+      const summary = await runCampaignPipeline(campaign.id);
+      setPipelineSummary(summary);
+
+      // Refresh all asset inference runs
+      loadAssetDetails(assets);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Pipeline execution failed');
+      }
+    } finally {
+      setPipelineRunning(false);
+    }
+  };
+
+  const handleRunSingleModel = async (assetId: string) => {
+    const modelId = selectedModelForAsset[assetId] || (enabledModels[0] ? enabledModels[0].id : '');
+    if (!modelId) {
+      setError('Please select an enabled model to run.');
+      return;
+    }
+
+    try {
+      setInferringMap((prev) => ({ ...prev, [assetId]: true }));
+      setError(null);
+      const run = await inferAsset(assetId, modelId);
+
+      // Add to state
+      setInferenceRunsMap((prev) => ({
+        ...prev,
+        [assetId]: [run, ...(prev[assetId] || []).filter((r) => r.id !== run.id)],
+      }));
+
+      // Automatically open the inference section
+      setExpandedInference((prev) => ({ ...prev, [assetId]: true }));
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Model inference failed');
+      }
+    } finally {
+      setInferringMap((prev) => ({ ...prev, [assetId]: false }));
+    }
+  };
+
   const toggleGallery = (assetId: string) => {
     setExpandedGallery((prev) => ({ ...prev, [assetId]: !prev[assetId] }));
   };
+
+  const toggleInference = (assetId: string) => {
+    setExpandedInference((prev) => ({ ...prev, [assetId]: !prev[assetId] }));
+  };
+
+  // Processable count: images are ready, videos must be completed
+  const processableCount = assets.filter((a) => {
+    if (a.media_type === 'image') return true;
+    const proc = processingMap[a.id];
+    return proc && proc.status === 'completed';
+  }).length;
 
   return (
     <div className="campaign-details-container">
@@ -201,6 +293,63 @@ export function CampaignDetails({
         </div>
       )}
 
+      {/* Pipeline Control Section */}
+      {assets.length > 0 && (
+        <div className="card pipeline-card">
+          <div className="pipeline-header">
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.15rem' }}>Model Inference Pipeline</h3>
+              <p className="subtitle" style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+                Run all enabled multimodal models against processable assets in this campaign.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary btn-run-pipeline"
+              onClick={handleRunPipeline}
+              disabled={pipelineRunning || enabledModels.length === 0}
+            >
+              {pipelineRunning ? 'Running Pipeline...' : '▶ Run Pipeline'}
+            </button>
+          </div>
+
+          <div className="pipeline-status-row">
+            <div className="pipeline-info-group">
+              <span className="pipeline-label">Enabled Models:</span>
+              {enabledModels.length === 0 ? (
+                <span className="text-muted" style={{ fontSize: '0.85rem' }}>
+                  No enabled models. Please enable models in the Model Registry.
+                </span>
+              ) : (
+                <div className="model-tag-list">
+                  {enabledModels.map((m) => (
+                    <span key={m.id} className="badge badge-neutral model-tag">
+                      {m.name} ({m.provider})
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pipeline-meta-stats">
+              <span>
+                Processable Assets: <strong>{processableCount}</strong> / {assets.length}
+              </span>
+            </div>
+          </div>
+
+          {pipelineSummary && (
+            <div className="pipeline-summary-alert">
+              <span>
+                ✓ Pipeline executed: <strong>{pipelineSummary.runs_created}</strong> runs created across{' '}
+                {pipelineSummary.assets} assets ({pipelineSummary.successful_runs || 0} completed
+                {pipelineSummary.failed_runs ? `, ${pipelineSummary.failed_runs} failed` : ''}).
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="card loading-card">
           <div className="spinner"></div>
@@ -226,8 +375,11 @@ export function CampaignDetails({
           {assets.map((asset) => {
             const proc = processingMap[asset.id];
             const isProcessing = processingLoading[asset.id];
+            const isInferring = inferringMap[asset.id];
             const frames = videoFramesMap[asset.id] || [];
             const isGalleryOpen = !!expandedGallery[asset.id];
+            const runs = inferenceRunsMap[asset.id] || [];
+            const isInferenceOpen = expandedInference[asset.id] !== false; // open by default if runs exist
 
             return (
               <div key={asset.id} className="card asset-card">
@@ -296,7 +448,7 @@ export function CampaignDetails({
                   {/* Processing Status & Metadata Section */}
                   <div className="processing-section">
                     <div className="processing-status-row">
-                      <span className="processing-label">Status:</span>
+                      <span className="processing-label">Media:</span>
                       <span
                         className={`badge badge-status ${
                           isProcessing
@@ -325,7 +477,6 @@ export function CampaignDetails({
                       </button>
                     </div>
 
-                    {/* Metadata details */}
                     {proc?.status === 'completed' && (
                       <div className="metadata-badge-list">
                         {asset.media_type === 'image' && (
@@ -371,7 +522,7 @@ export function CampaignDetails({
                       </p>
                     )}
 
-                    {/* Extracted frames gallery toggle for videos */}
+                    {/* Extracted frames gallery for videos */}
                     {asset.media_type === 'video' &&
                       proc?.status === 'completed' &&
                       frames.length > 0 && (
@@ -414,6 +565,165 @@ export function CampaignDetails({
                         </div>
                       )}
                   </div>
+
+                  {/* Inference Results Section */}
+                  <div className="inference-section">
+                    <div className="inference-header-row">
+                      <button
+                        type="button"
+                        className="btn-link inference-toggle-btn"
+                        onClick={() => toggleInference(asset.id)}
+                      >
+                        {isInferenceOpen
+                          ? `▲ Inference Runs (${runs.length})`
+                          : `▼ View Inference Runs (${runs.length})`}
+                      </button>
+
+                      {enabledModels.length > 0 && (
+                        <div className="run-model-dropdown-group">
+                          <select
+                            className="model-select"
+                            value={selectedModelForAsset[asset.id] || enabledModels[0]?.id}
+                            onChange={(e) =>
+                              setSelectedModelForAsset((prev) => ({
+                                ...prev,
+                                [asset.id]: e.target.value,
+                              }))
+                            }
+                            disabled={isInferring}
+                          >
+                            {enabledModels.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={() => handleRunSingleModel(asset.id)}
+                            disabled={isInferring}
+                          >
+                            {isInferring ? 'Running...' : 'Run'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {isInferenceOpen && (
+                      <div className="inference-results-list">
+                        {runs.length === 0 ? (
+                          <p className="text-muted" style={{ fontSize: '0.78rem', margin: '0.25rem 0' }}>
+                            No model runs yet. Use 'Run' above or 'Run Pipeline' to evaluate.
+                          </p>
+                        ) : (
+                          runs.map((run) => {
+                            const contextData = run.context || run.context_json;
+                            const textOutput = run.text || run.response_text;
+                            return (
+                              <div key={run.id} className="inference-run-card">
+                                <div className="run-card-top">
+                                  <div className="run-model-meta">
+                                    <strong>{run.model_name || 'Model'}</strong>
+                                    {run.provider && (
+                                      <span className="meta-pill" style={{ marginLeft: '0.35rem' }}>
+                                        {run.provider}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span
+                                    className={`badge badge-status ${
+                                      run.status === 'completed'
+                                        ? 'badge-completed'
+                                        : run.status === 'failed'
+                                        ? 'badge-failed'
+                                        : 'badge-processing'
+                                    }`}
+                                  >
+                                    {run.status}
+                                  </span>
+                                </div>
+
+                                {run.status === 'completed' && (
+                                  <>
+                                    <div className="run-telemetry-row">
+                                      {run.latency_ms && (
+                                        <span className="telemetry-pill">
+                                          ⏱ {(run.latency_ms / 1000).toFixed(2)}s
+                                        </span>
+                                      )}
+                                      {run.estimated_cost_usd !== null &&
+                                        run.estimated_cost_usd !== undefined && (
+                                          <span className="telemetry-pill">
+                                            💰 ${run.estimated_cost_usd.toFixed(4)}
+                                          </span>
+                                        )}
+                                      {run.input_tokens && run.output_tokens && (
+                                        <span className="telemetry-pill">
+                                          🔤 {run.input_tokens} / {run.output_tokens} tok
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {textOutput && (
+                                      <div className="inference-text-box">
+                                        <strong>Text:</strong>
+                                        <p>{textOutput}</p>
+                                      </div>
+                                    )}
+
+                                    {contextData && (
+                                      <div className="inference-context-box">
+                                        <strong>Context:</strong>
+                                        <div className="context-fields">
+                                          {contextData.brand && (
+                                            <div>
+                                              <span className="context-key">Brand:</span>{' '}
+                                              {contextData.brand}
+                                            </div>
+                                          )}
+                                          {contextData.product && (
+                                            <div>
+                                              <span className="context-key">Product:</span>{' '}
+                                              {contextData.product}
+                                            </div>
+                                          )}
+                                          {contextData.offer && (
+                                            <div>
+                                              <span className="context-key">Offer:</span>{' '}
+                                              {contextData.offer}
+                                            </div>
+                                          )}
+                                          {contextData.cta && (
+                                            <div>
+                                              <span className="context-key">CTA:</span>{' '}
+                                              {contextData.cta}
+                                            </div>
+                                          )}
+                                          {contextData.summary && (
+                                            <div>
+                                              <span className="context-key">Summary:</span>{' '}
+                                              {contextData.summary}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {run.status === 'failed' && (
+                                  <p className="processing-error-text">
+                                    Error: {run.error_message || 'Inference execution failed'}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -427,8 +737,8 @@ export function CampaignDetails({
                 <th style={{ width: '80px' }}>Preview</th>
                 <th>Filename</th>
                 <th>Type</th>
-                <th>Metadata</th>
-                <th>Status</th>
+                <th>Media Status</th>
+                <th>Inference Runs</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -436,6 +746,8 @@ export function CampaignDetails({
               {assets.map((asset) => {
                 const proc = processingMap[asset.id];
                 const isProcessing = processingLoading[asset.id];
+                const isInferring = inferringMap[asset.id];
+                const runs = inferenceRunsMap[asset.id] || [];
 
                 return (
                   <tr key={asset.id}>
@@ -482,26 +794,6 @@ export function CampaignDetails({
                       </span>
                     </td>
                     <td>
-                      {proc?.status === 'completed' ? (
-                        <div className="table-meta">
-                          {proc.width && proc.height && (
-                            <div>
-                              {proc.width} × {proc.height}
-                            </div>
-                          )}
-                          {proc.format && <div>Format: {proc.format}</div>}
-                          {proc.duration_ms && (
-                            <div>Duration: {formatDuration(proc.duration_ms)}</div>
-                          )}
-                          {proc.frames_extracted !== null && proc.frames_extracted !== undefined && (
-                            <div>Frames: {proc.frames_extracted}</div>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
-                    </td>
-                    <td>
                       <span
                         className={`badge badge-status ${
                           isProcessing
@@ -517,14 +809,36 @@ export function CampaignDetails({
                       </span>
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => handleProcessAsset(asset, !!proc)}
-                        disabled={isProcessing}
-                      >
-                        {isProcessing ? '...' : proc?.status === 'completed' ? 'Re-process' : 'Process'}
-                      </button>
+                      <div className="table-meta">
+                        <span>{runs.length} runs</span>
+                        {runs.slice(0, 2).map((r) => (
+                          <span key={r.id} style={{ fontSize: '0.75rem' }}>
+                            {r.model_name || 'Model'}: {r.status}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => handleProcessAsset(asset, !!proc)}
+                          disabled={isProcessing}
+                        >
+                          {isProcessing ? '...' : proc?.status === 'completed' ? 'Re-process' : 'Process'}
+                        </button>
+                        {enabledModels.length > 0 && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={() => handleRunSingleModel(asset.id)}
+                            disabled={isInferring}
+                          >
+                            {isInferring ? '...' : 'Infer'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
