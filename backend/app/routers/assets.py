@@ -4,7 +4,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.asset import AssetResponse
-from app.schemas.media_processing import MediaProcessingResponse, ProcessAssetRequest
+from app.schemas.media_processing import (
+    AssetFramesResponse,
+    MediaProcessingResponse,
+    ProcessAssetRequest,
+)
 from app.services import asset_service, media_processing_service, storage_service
 
 
@@ -55,6 +59,48 @@ def process_asset_endpoint(
     db: Session = Depends(get_db),
 ):
     sample_fps = payload.sample_fps if payload else 1.0
-    return media_processing_service.process_asset(db, asset_id, sample_fps=sample_fps)
+    force = payload.force if payload else False
+    return media_processing_service.process_asset(db, asset_id, sample_fps=sample_fps, force=force)
+
+@router.get("/{asset_id}/processing", response_model=MediaProcessingResponse, status_code=status.HTTP_200_OK)
+def get_asset_processing_endpoint(
+    asset_id: str,
+    db: Session = Depends(get_db),
+):
+    asset = asset_service.get_asset_by_id(db, asset_id)
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with id '{asset_id}' not found",
+        )
+
+    record = media_processing_service.get_processing_by_asset_id(db, asset_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Processing record for asset '{asset_id}' not found",
+        )
+    return record
+
+@router.get("/{asset_id}/frames", response_model=AssetFramesResponse, status_code=status.HTTP_200_OK)
+def get_asset_frames_endpoint(
+    asset_id: str,
+    db: Session = Depends(get_db),
+):
+    return media_processing_service.get_asset_frames(db, asset_id)
+
+@router.get("/{asset_id}/frames/{frame_filename}")
+def get_asset_frame_file_endpoint(
+    asset_id: str,
+    frame_filename: str,
+    db: Session = Depends(get_db),
+):
+    frame_path = media_processing_service.get_asset_frame_disk_path(db, asset_id, frame_filename)
+    return FileResponse(
+        path=frame_path,
+        media_type="image/jpeg",
+        filename=frame_filename,
+    )
+
 
 

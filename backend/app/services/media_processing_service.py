@@ -1,14 +1,18 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from pathlib import Path
+from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.asset import Asset
 from app.models.media_processing import MediaProcessing
-from app.schemas.media_processing import MediaProcessingUpdate
+from app.schemas.media_processing import (
+    AssetFramesResponse,
+    FrameInfo,
+    MediaProcessingUpdate,
+)
 from app.services import ffmpeg_service, image_processor, storage_service
-
 
 def create_or_get_processing_record(
     db: Session,
@@ -71,8 +75,12 @@ def process_asset(
     db: Session,
     asset_id: str,
     sample_fps: Optional[float] = 1.0,
+    force: bool = False,
 ) -> MediaProcessing:
-    """Process asset media (image or video) and record results in MediaProcessing."""
+    """
+    Process asset media (image or video) and record results in MediaProcessing.
+    Idempotent by default: if completed and not force, returns existing record.
+    """
     fps = sample_fps if sample_fps is not None else 1.0
     if fps <= 0 or fps > 60:
         raise HTTPException(
@@ -88,6 +96,10 @@ def process_asset(
         )
 
     processing = create_or_get_processing_record(db, asset_id, asset.media_type)
+
+    # Idempotent return if already completed
+    if processing.status == "completed" and not force:
+        return processing
 
     if asset.media_type == "image":
         update_processing_record(
@@ -129,7 +141,6 @@ def process_asset(
             disk_path = storage_service.get_asset_disk_path(asset.file_path)
             meta = ffmpeg_service.probe_video(disk_path)
 
-            # Extract frames
             frames_disk_dir = (
                 settings.UPLOAD_DIR / asset.campaign_id / "processed" / asset.id / "frames"
             )
@@ -170,4 +181,63 @@ def process_asset(
 
     return processing
 
+def get_asset_frames(db: Session, asset_id: str) -> AssetFramesResponse:
+    """Retrieve the list of extracted frames for an asset."""
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with id '{asset_id}' not found",
+        )
 
+    processing = get_processing_by_asset_id(db, asset_id)
+    if not processing or not processing.frame_directory:
+        return AssetFramesResponse(
+            asset_id=asset_id,
+            total_frames=0,
+            frame_directory=None,
+            frames=[],
+        )
+
+    frames_disk_dir = (
+        settings.UPLOAD_DIR / asset.campaign_id / "processed" / asset.id / "frames"
+    )
+    frames: List[FrameInfo] = []
+    if frames_disk_dir.is_dir():
+        file_list = sorted(list(frames_disk_dir.glob("frame_*.jpg")))
+        for idx, frame_file in enumerate(file_list, start=1):
+            frames.append(
+                FrameInfo(
+                    frame_number=idx,
+                    filename=frame_file.name,
+                    url=f"/assets/{asset_id}/frames/{frame_file.name}",
+                )
+            )
+
+    return AssetFramesResponse(
+        asset_id=asset_id,
+        total_frames=len(frames),
+        frame_directory=processing.frame_directory,
+        frames=frames,
+    )
+
+def get_asset_frame_disk_path(db: Session, asset_id: str, frame_filename: str) -> Path:
+    """Locate the disk path of a specific extracted frame."""
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with id '{asset_id}' not found",
+        )
+
+    safe_filename = storage_service.sanitize_filename(frame_filename)
+    frame_path = (
+        settings.UPLOAD_DIR / asset.campaign_id / "processed" / asset.id / "frames" / safe_filename
+    )
+    if not frame_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Frame '{frame_filename}' not found for asset '{asset_id}'",
+        )
+
+    return frame_path

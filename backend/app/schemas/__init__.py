@@ -1,6 +1,8 @@
 from app.schemas.campaign import CampaignCreate, CampaignResponse
 from app.schemas.asset import AssetCreate, AssetResponse, MediaType
 from app.schemas.media_processing import (
+    AssetFramesResponse,
+    FrameInfo,
     MediaProcessingCreate,
     MediaProcessingResponse,
     MediaProcessingUpdate,
@@ -19,4 +21,6 @@ __all__ = [
     "MediaProcessingUpdate",
     "ProcessAssetRequest",
     "ProcessingStatus",
+    "FrameInfo",
+    "AssetFramesResponse",
 ]

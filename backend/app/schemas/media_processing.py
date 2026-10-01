@@ -1,11 +1,12 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 ProcessingStatus = Literal["pending", "processing", "completed", "failed"]
 
 class ProcessAssetRequest(BaseModel):
     sample_fps: Optional[float] = Field(default=1.0, gt=0, le=60)
+    force: Optional[bool] = False
 
 class MediaProcessingBase(BaseModel):
     media_type: str
@@ -46,3 +47,14 @@ class MediaProcessingResponse(MediaProcessingBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class FrameInfo(BaseModel):
+    frame_number: int
+    filename: str
+    url: str
+
+class AssetFramesResponse(BaseModel):
+    asset_id: str
+    total_frames: int
+    frame_directory: Optional[str] = None
+    frames: List[FrameInfo] = []
