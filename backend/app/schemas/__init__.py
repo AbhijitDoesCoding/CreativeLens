@@ -4,6 +4,7 @@ from app.schemas.media_processing import (
     MediaProcessingCreate,
     MediaProcessingResponse,
     MediaProcessingUpdate,
+    ProcessAssetRequest,
     ProcessingStatus,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "MediaProcessingCreate",
     "MediaProcessingResponse",
     "MediaProcessingUpdate",
+    "ProcessAssetRequest",
     "ProcessingStatus",
 ]

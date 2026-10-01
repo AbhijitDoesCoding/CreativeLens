@@ -1,9 +1,12 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.asset import AssetResponse
-from app.services import asset_service, storage_service
+from app.schemas.media_processing import MediaProcessingResponse, ProcessAssetRequest
+from app.services import asset_service, media_processing_service, storage_service
+
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
@@ -44,4 +47,14 @@ def get_asset_file_endpoint(
         media_type=asset.mime_type,
         filename=asset.filename,
     )
+
+@router.post("/{asset_id}/process", response_model=MediaProcessingResponse, status_code=status.HTTP_200_OK)
+def process_asset_endpoint(
+    asset_id: str,
+    payload: Optional[ProcessAssetRequest] = None,
+    db: Session = Depends(get_db),
+):
+    sample_fps = payload.sample_fps if payload else 1.0
+    return media_processing_service.process_asset(db, asset_id, sample_fps=sample_fps)
+
 

@@ -19,11 +19,16 @@ class MediaProcessing(Base):
     status = Column(String(50), nullable=False, default="pending")  # 'pending', 'processing', 'completed', 'failed'
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
+    format = Column(String(50), nullable=True)
+    color_mode = Column(String(50), nullable=True)
     duration_ms = Column(Integer, nullable=True)
     frame_rate = Column(Float, nullable=True)
     total_frames = Column(Integer, nullable=True)
+    frames_extracted = Column(Integer, nullable=True)
+    frame_directory = Column(String(1024), nullable=True)
     processed_at = Column(DateTime(timezone=True), nullable=True)
     error_message = Column(String(1024), nullable=True)
+
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

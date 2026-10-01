@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.asset import Asset
 from app.models.media_processing import MediaProcessing
 from app.schemas.media_processing import MediaProcessingUpdate
+from app.services import image_processor, storage_service
 
 def create_or_get_processing_record(
     db: Session,
@@ -62,4 +63,52 @@ def update_processing_record(
 
     db.commit()
     db.refresh(processing)
+    return processing
+
+def process_asset(
+    db: Session,
+    asset_id: str,
+    sample_fps: Optional[float] = 1.0,
+) -> MediaProcessing:
+    """Process asset media (image or video) and record results in MediaProcessing."""
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with id '{asset_id}' not found",
+        )
+
+    processing = create_or_get_processing_record(db, asset_id, asset.media_type)
+
+    if asset.media_type == "image":
+        update_processing_record(
+            db=db,
+            processing=processing,
+            update_data=MediaProcessingUpdate(status="processing"),
+        )
+        try:
+            disk_path = storage_service.get_asset_disk_path(asset.file_path)
+            meta = image_processor.process_image(disk_path)
+            update_processing_record(
+                db=db,
+                processing=processing,
+                update_data=MediaProcessingUpdate(
+                    status="completed",
+                    width=meta["width"],
+                    height=meta["height"],
+                    format=meta["format"],
+                    color_mode=meta["color_mode"],
+                    error_message=None,
+                ),
+            )
+        except Exception as e:
+            update_processing_record(
+                db=db,
+                processing=processing,
+                update_data=MediaProcessingUpdate(
+                    status="failed",
+                    error_message=str(e),
+                ),
+            )
+
     return processing
