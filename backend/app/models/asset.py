@@ -26,3 +26,10 @@ class Asset(Base):
     )
 
     campaign = relationship("Campaign", back_populates="assets")
+    media_processing = relationship(
+        "MediaProcessing",
+        back_populates="asset",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+

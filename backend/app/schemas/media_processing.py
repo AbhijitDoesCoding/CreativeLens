@@ -1,0 +1,37 @@
+from datetime import datetime
+from typing import Literal, Optional
+from pydantic import BaseModel, ConfigDict
+
+ProcessingStatus = Literal["pending", "processing", "completed", "failed"]
+
+class MediaProcessingBase(BaseModel):
+    media_type: str
+    status: ProcessingStatus = "pending"
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration_ms: Optional[int] = None
+    frame_rate: Optional[float] = None
+    total_frames: Optional[int] = None
+    processed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+class MediaProcessingCreate(MediaProcessingBase):
+    asset_id: str
+
+class MediaProcessingUpdate(BaseModel):
+    status: Optional[ProcessingStatus] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration_ms: Optional[int] = None
+    frame_rate: Optional[float] = None
+    total_frames: Optional[int] = None
+    processed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+class MediaProcessingResponse(MediaProcessingBase):
+    id: str
+    asset_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
