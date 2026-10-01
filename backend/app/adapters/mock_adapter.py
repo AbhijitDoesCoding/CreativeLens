@@ -15,14 +15,27 @@ class MockModelAdapter(ModelAdapter):
         model_key: str = "mock-vision-v1",
         simulated_latency_ms: int = 120,
         should_fail: bool = False,
+        should_timeout: bool = False,
+        available: bool = True,
+        malformed_response: bool = False,
+        missing_usage: bool = False,
+        empty_output: bool = False,
         fixed_text: Optional[str] = None,
         fixed_context: Optional[Dict[str, Any]] = None,
     ):
         self.model_key = model_key
         self.simulated_latency_ms = simulated_latency_ms
         self.should_fail = should_fail
+        self.should_timeout = should_timeout
+        self.available = available
+        self.malformed_response = malformed_response
+        self.missing_usage = missing_usage
+        self.empty_output = empty_output
         self.fixed_text = fixed_text
         self.fixed_context = fixed_context
+
+    def is_available(self) -> bool:
+        return self.available
 
     def _detect_marketing_context(self, request: ModelRequest) -> Dict[str, str]:
         if self.fixed_context:
@@ -84,6 +97,23 @@ class MockModelAdapter(ModelAdapter):
         if self.should_fail:
             raise RuntimeError(f"Mock model [{self.model_key}] simulated provider failure")
 
+        if self.should_timeout:
+            time.sleep(0.3)
+
+        if self.malformed_response:
+            return "INVALID_NON_MODEL_RESPONSE"  # type: ignore
+
+        if self.empty_output:
+            return ModelResponse(
+                text="",
+                context=ModelContext(),
+                latency_ms=10,
+                ttft_ms=5,
+                input_tokens=10,
+                output_tokens=0,
+                estimated_cost_usd=0.00001,
+            )
+
         if self.simulated_latency_ms > 0:
             # Small non-blocking sleep (max 20ms) so tests stay fast while simulating realistic passage of time
             time.sleep(min(self.simulated_latency_ms / 1000.0, 0.02))
@@ -100,6 +130,17 @@ class MockModelAdapter(ModelAdapter):
             text = f"Video Commercial: {context_dict['brand']} {context_dict['product']}. Sequence across {num_frames} frames. {context_dict['cta']}."
         else:
             text = f"{context_dict['brand']} {context_dict['product']} Creative Promo."
+
+        if self.missing_usage:
+            return ModelResponse(
+                text=text,
+                context=ModelContext(**context_dict),
+                latency_ms=None,
+                ttft_ms=None,
+                input_tokens=None,
+                output_tokens=None,
+                estimated_cost_usd=None,
+            )
 
         # Token calculation heuristic
         input_tokens = len(text.split()) * 25 + (len(request.frame_paths or []) * 120 if request.frame_paths else 150)

@@ -27,14 +27,14 @@ class InferenceRunBase(BaseModel):
 
     @model_validator(mode="after")
     def sync_text_and_context(self) -> "InferenceRunBase":
-        if not self.text and self.response_text:
+        if self.text is None and self.response_text is not None:
             self.text = self.response_text
-        elif not self.response_text and self.text:
+        elif self.response_text is None and self.text is not None:
             self.response_text = self.text
 
-        if not self.context and self.context_json:
+        if self.context is None and self.context_json is not None:
             self.context = self.context_json
-        elif not self.context_json and self.context:
+        elif self.context_json is None and self.context is not None:
             self.context_json = self.context
         return self
 

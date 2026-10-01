@@ -1,3 +1,4 @@
+import concurrent.futures
 import time
 import uuid
 from datetime import datetime, timezone
@@ -5,6 +6,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.adapters import AdapterNotFoundError, ModelRequest, get_adapter
+from app.adapters.base import ModelResponse
 from app.models.asset import Asset
 from app.models.inference_run import InferenceRun
 from app.models.model import Model
@@ -165,31 +167,60 @@ def run_asset_inference(
     db.refresh(inference_run)
 
     wall_start = time.perf_counter()
+    timeout_seconds = None
+    if model.configuration_json and isinstance(model.configuration_json, dict):
+        timeout_seconds = model.configuration_json.get("timeout_seconds")
+
     try:
-        adapter_response = adapter.run(model_request)
+        # Check adapter availability
+        if not adapter.is_available():
+            raise RuntimeError(f"Model adapter for provider '{model.provider}' is currently unavailable")
+
+        # Execute adapter with optional timeout
+        if timeout_seconds and timeout_seconds > 0:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(adapter.run, model_request)
+                try:
+                    adapter_response = future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(f"Model inference timed out after {timeout_seconds} seconds")
+        else:
+            adapter_response = adapter.run(model_request)
+
         wall_elapsed_ms = int((time.perf_counter() - wall_start) * 1000)
 
-        # Calculate or adopt latency & costs
+        # Validate adapter response type
+        if not isinstance(adapter_response, ModelResponse):
+            raise ValueError(
+                f"Malformed model response: expected ModelResponse instance, got {type(adapter_response).__name__}"
+            )
+
+        # Handle empty or missing output safely
+        resp_text = adapter_response.text if adapter_response.text is not None else ""
+        context_data = adapter_response.context.model_dump() if adapter_response.context else {}
+
+        # Calculate or adopt latency & costs (handles missing usage info gracefully)
         latency_ms = adapter_response.latency_ms or wall_elapsed_ms
         ttft_ms = adapter_response.ttft_ms
         input_tokens = adapter_response.input_tokens
         output_tokens = adapter_response.output_tokens
 
         estimated_cost = adapter_response.estimated_cost_usd
-        if estimated_cost is None and model.pricing_json and input_tokens and output_tokens:
+        if estimated_cost is None and model.pricing_json and input_tokens is not None and output_tokens is not None:
+            pricing = model.pricing_json if isinstance(model.pricing_json, dict) else {}
             in_rate = (
-                model.pricing_json.get("input_per_million", 0) / 1_000_000
-                or model.pricing_json.get("input_cost", 0)
+                pricing.get("input_per_million", 0) / 1_000_000
+                or pricing.get("input_cost", 0)
             )
             out_rate = (
-                model.pricing_json.get("output_per_million", 0) / 1_000_000
-                or model.pricing_json.get("output_cost", 0)
+                pricing.get("output_per_million", 0) / 1_000_000
+                or pricing.get("output_cost", 0)
             )
             estimated_cost = round((input_tokens * in_rate) + (output_tokens * out_rate), 6)
 
         inference_run.status = "completed"
-        inference_run.response_text = adapter_response.text
-        inference_run.context_json = adapter_response.context.model_dump()
+        inference_run.response_text = resp_text
+        inference_run.context_json = context_data
         inference_run.completed_at = datetime.now(timezone.utc)
         inference_run.latency_ms = latency_ms
         inference_run.ttft_ms = ttft_ms
