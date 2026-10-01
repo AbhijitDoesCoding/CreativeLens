@@ -1,12 +1,14 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.campaign import CampaignCreate, CampaignResponse
 from app.schemas.asset import AssetResponse
-from app.services import campaign_service, asset_service
+from app.schemas.pipeline import CampaignRunRequest, CampaignRunResponse
+from app.services import campaign_service, asset_service, pipeline_service
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
+
 
 @router.post("", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
 def create_campaign_endpoint(
@@ -60,5 +62,17 @@ def upload_campaign_asset_endpoint(
             detail=f"Campaign with id '{campaign_id}' not found",
         )
     return asset_service.save_and_create_asset(db, campaign_id, file)
+
+@router.post("/{campaign_id}/run", response_model=CampaignRunResponse, status_code=status.HTTP_200_OK)
+def run_campaign_pipeline_endpoint(
+    campaign_id: str,
+    payload: Optional[CampaignRunRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Execute all enabled models against all processable assets in a campaign.
+    """
+    return pipeline_service.run_campaign_pipeline(db=db, campaign_id=campaign_id, request=payload)
+
 
 
