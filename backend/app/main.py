@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import health, campaigns, assets, models
+from app.routers import health, campaigns, assets, models, inference
 from app.core.config import settings
 from app.db.session import Base, engine
 
@@ -27,6 +27,8 @@ app.include_router(health.router)
 app.include_router(campaigns.router)
 app.include_router(assets.router)
 app.include_router(models.router)
+app.include_router(inference.router)
+
 
 
 
