@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.models.asset import Asset
 from app.models.media_processing import MediaProcessing
 from app.schemas.media_processing import MediaProcessingUpdate
-from app.services import image_processor, storage_service
+from app.services import ffmpeg_service, image_processor, storage_service
+
 
 def create_or_get_processing_record(
     db: Session,
@@ -110,5 +111,38 @@ def process_asset(
                     error_message=str(e),
                 ),
             )
+    elif asset.media_type == "video":
+        update_processing_record(
+            db=db,
+            processing=processing,
+            update_data=MediaProcessingUpdate(status="processing"),
+        )
+        try:
+            disk_path = storage_service.get_asset_disk_path(asset.file_path)
+            meta = ffmpeg_service.probe_video(disk_path)
+            update_processing_record(
+                db=db,
+                processing=processing,
+                update_data=MediaProcessingUpdate(
+                    status="completed",
+                    width=meta["width"],
+                    height=meta["height"],
+                    duration_ms=meta["duration_ms"],
+                    frame_rate=meta["frame_rate"],
+                    total_frames=meta["total_frames"],
+                    format=meta["codec"],
+                    error_message=None,
+                ),
+            )
+        except Exception as e:
+            update_processing_record(
+                db=db,
+                processing=processing,
+                update_data=MediaProcessingUpdate(
+                    status="failed",
+                    error_message=str(e),
+                ),
+            )
 
     return processing
+
