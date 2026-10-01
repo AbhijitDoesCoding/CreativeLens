@@ -2,25 +2,39 @@ import { useEffect, useState } from 'react';
 import { CampaignList } from './components/CampaignList';
 import { CreateCampaign } from './components/CreateCampaign';
 import { CampaignDetails } from './components/CampaignDetails';
+import { ModelManagement } from './components/ModelManagement';
 import {
   createCampaign,
+  createModel,
+  disableModel,
+  enableModel,
   getCampaign,
   getCampaignAssets,
   getCampaigns,
+  getModels,
+  updateModel,
   uploadCampaignAsset,
 } from './services/api';
-import type { Asset, Campaign } from './types';
+import type {
+  Asset,
+  Campaign,
+  CreateModelInput,
+  Model,
+  UpdateModelInput,
+} from './types';
 import './App.css';
 
-type ViewMode = 'list' | 'create' | 'details';
+type ViewMode = 'list' | 'create' | 'details' | 'models';
 
 export default function App() {
   const [view, setView] = useState<ViewMode>('list');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState<boolean>(true);
   const [loadingAssets, setLoadingAssets] = useState<boolean>(false);
+  const [loadingModels, setLoadingModels] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchCampaigns = async () => {
@@ -40,8 +54,25 @@ export default function App() {
     }
   };
 
+  const fetchModels = async () => {
+    try {
+      setLoadingModels(true);
+      const data = await getModels();
+      setModels(data);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to load models.');
+      }
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
   useEffect(() => {
     fetchCampaigns();
+    fetchModels();
   }, []);
 
   const handleOpenCampaign = async (campaignId: string) => {
@@ -50,7 +81,6 @@ export default function App() {
       setLoadingAssets(true);
       setView('details');
 
-      // Fetch campaign and its assets concurrently
       const [campaignData, assetsData] = await Promise.all([
         getCampaign(campaignId),
         getCampaignAssets(campaignId),
@@ -71,9 +101,7 @@ export default function App() {
 
   const handleCreateCampaign = async (name: string) => {
     const newCampaign = await createCampaign(name);
-    // Refresh campaign list
     await fetchCampaigns();
-    // Open the new campaign
     await handleOpenCampaign(newCampaign.id);
   };
 
@@ -84,11 +112,9 @@ export default function App() {
       await uploadCampaignAsset(selectedCampaign.id, file);
     }
 
-    // Refresh assets for this campaign
     const updatedAssets = await getCampaignAssets(selectedCampaign.id);
     setAssets(updatedAssets);
 
-    // Update campaign asset count in state
     setSelectedCampaign((prev) =>
       prev ? { ...prev, asset_count: updatedAssets.length } : null
     );
@@ -101,6 +127,26 @@ export default function App() {
     fetchCampaigns();
   };
 
+  const handleCreateModel = async (data: CreateModelInput) => {
+    await createModel(data);
+    await fetchModels();
+  };
+
+  const handleUpdateModel = async (modelId: string, data: UpdateModelInput) => {
+    await updateModel(modelId, data);
+    await fetchModels();
+  };
+
+  const handleEnableModel = async (modelId: string) => {
+    await enableModel(modelId);
+    await fetchModels();
+  };
+
+  const handleDisableModel = async (modelId: string) => {
+    await disableModel(modelId);
+    await fetchModels();
+  };
+
   return (
     <div className="app-container">
       <header className="app-header">
@@ -108,6 +154,27 @@ export default function App() {
           <h1>CreativeLens</h1>
           <p className="subtitle">Marketing Creative Evaluation Platform</p>
         </div>
+
+        <nav className="header-nav">
+          <button
+            type="button"
+            className={`nav-tab ${view !== 'models' ? 'active' : ''}`}
+            onClick={handleBackToList}
+          >
+            Campaigns
+          </button>
+          <button
+            type="button"
+            className={`nav-tab ${view === 'models' ? 'active' : ''}`}
+            onClick={() => {
+              setView('models');
+              setSelectedCampaign(null);
+              fetchModels();
+            }}
+          >
+            Model Registry
+          </button>
+        </nav>
       </header>
 
       {error && (
@@ -143,6 +210,18 @@ export default function App() {
             loading={loadingAssets}
             onBack={handleBackToList}
             onUploadFiles={handleUploadFiles}
+          />
+        )}
+
+        {view === 'models' && (
+          <ModelManagement
+            models={models}
+            loading={loadingModels}
+            onRefresh={fetchModels}
+            onCreateModel={handleCreateModel}
+            onUpdateModel={handleUpdateModel}
+            onEnableModel={handleEnableModel}
+            onDisableModel={handleDisableModel}
           />
         )}
       </main>

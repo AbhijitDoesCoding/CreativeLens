@@ -769,3 +769,53 @@
   color: #9ca3af;
 }
 
+/* Header Navigation Tabs */
+.header-nav {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.nav-tab {
+  background: none;
+  border: 1px solid transparent;
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #4b5563;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.nav-tab:hover {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+.nav-tab.active {
+  background-color: #eff6ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
+  font-weight: 600;
+}
+
+/* Model Management UI */
+.model-stats-pill {
+  background-color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.model-stats-pill strong {
+  color: #166534;
+}
+
+.form-modal {
+  max-width: 600px;
+}
+
+

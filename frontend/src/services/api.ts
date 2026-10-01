@@ -2,9 +2,13 @@ import type {
   Asset,
   AssetFramesResponse,
   Campaign,
+  CreateModelInput,
   HealthStatus,
   MediaProcessing,
+  Model,
+  UpdateModelInput,
 } from '../types';
+
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -131,3 +135,69 @@ export async function getAssetFrames(assetId: string): Promise<AssetFramesRespon
 export function getFrameUrl(assetId: string, frameFilename: string): string {
   return `${API_BASE_URL}/assets/${assetId}/frames/${frameFilename}`;
 }
+
+export async function getModels(enabledOnly: boolean = false): Promise<Model[]> {
+  const url = enabledOnly ? `${API_BASE_URL}/models?enabled_only=true` : `${API_BASE_URL}/models`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch models (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function getModel(modelId: string): Promise<Model> {
+  const response = await fetch(`${API_BASE_URL}/models/${modelId}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch model (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function createModel(data: CreateModelInput): Promise<Model> {
+  const response = await fetch(`${API_BASE_URL}/models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to create model (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function updateModel(modelId: string, data: UpdateModelInput): Promise<Model> {
+  const response = await fetch(`${API_BASE_URL}/models/${modelId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to update model (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function enableModel(modelId: string): Promise<Model> {
+  const response = await fetch(`${API_BASE_URL}/models/${modelId}/enable`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to enable model (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function disableModel(modelId: string): Promise<Model> {
+  const response = await fetch(`${API_BASE_URL}/models/${modelId}/disable`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to disable model (${response.status})`);
+  }
+  return response.json();
+}
+

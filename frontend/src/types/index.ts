@@ -61,3 +61,37 @@ export interface AssetFramesResponse {
   frame_directory?: string | null;
   frames: FrameInfo[];
 }
+
+export interface Model {
+  id: string;
+  name: string;
+  provider: string;
+  model_key: string;
+  model_type: string;
+  enabled: boolean;
+  configuration_json?: Record<string, any> | null;
+  pricing_json?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateModelInput {
+  name: string;
+  provider: string;
+  model_key: string;
+  model_type?: string;
+  enabled?: boolean;
+  configuration_json?: Record<string, any> | null;
+  pricing_json?: Record<string, any> | null;
+}
+
+export interface UpdateModelInput {
+  name?: string;
+  provider?: string;
+  model_key?: string;
+  model_type?: string;
+  enabled?: boolean;
+  configuration_json?: Record<string, any> | null;
+  pricing_json?: Record<string, any> | null;
+}
+
