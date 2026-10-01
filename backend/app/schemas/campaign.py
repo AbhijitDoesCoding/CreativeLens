@@ -20,5 +20,7 @@ class CampaignResponse(CampaignBase):
     name: str
     created_at: datetime
     updated_at: datetime
+    asset_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
+

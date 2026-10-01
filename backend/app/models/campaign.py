@@ -28,3 +28,8 @@ class Campaign(Base):
         order_by="Asset.created_at.desc()",
     )
 
+    @property
+    def asset_count(self) -> int:
+        return len(self.assets) if self.assets else 0
+
+
