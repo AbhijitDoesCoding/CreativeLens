@@ -151,3 +151,71 @@ def probe_video(file_path: Path) -> Dict[str, Any]:
         "total_frames": total_frames,
         "codec": str(codec),
     }
+
+def extract_video_frames(
+    video_path: Path,
+    output_dir: Path,
+    sample_fps: float = 1.0,
+) -> int:
+    """
+    Extracts sampled frames from a video file using ffmpeg.
+    Frames are named sequentially: frame_000001.jpg, frame_000002.jpg, ...
+    Returns:
+        int: Total number of frames extracted
+    Raises:
+        FileNotFoundError: if video file does not exist
+        FFmpegNotFoundError: if ffmpeg is not installed
+        VideoProcessingError: if extraction fails or arguments are invalid
+    """
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    if sample_fps <= 0 or sample_fps > 60:
+        raise VideoProcessingError(
+            f"Invalid sample_fps {sample_fps}. Must be between 0 and 60."
+        )
+
+    ffmpeg_bin = get_binary_path("ffmpeg")
+    if not ffmpeg_bin:
+        raise FFmpegNotFoundError(
+            "ffmpeg is not installed or not found on system PATH. Please install FFmpeg."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clean prior extraction in this directory if any
+    for old_frame in output_dir.glob("frame_*.jpg"):
+        old_frame.unlink(missing_ok=True)
+
+    pattern = str(output_dir / "frame_%06d.jpg")
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-i", str(video_path),
+        "-vf", f"fps={sample_fps}",
+        "-q:v", "2",
+        pattern,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise VideoProcessingError("Video frame extraction timed out")
+    except Exception as e:
+        raise VideoProcessingError(f"Failed to execute ffmpeg frame extraction: {str(e)}")
+
+    if result.returncode != 0:
+        raise VideoProcessingError(
+            "Failed to extract frames: malformed or unreadable video"
+        )
+
+    extracted_frames = sorted(list(output_dir.glob("frame_*.jpg")))
+    return len(extracted_frames)
+

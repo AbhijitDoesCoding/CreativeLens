@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from app.core.config import settings
 from app.models.asset import Asset
 from app.models.media_processing import MediaProcessing
 from app.schemas.media_processing import MediaProcessingUpdate
@@ -72,6 +73,13 @@ def process_asset(
     sample_fps: Optional[float] = 1.0,
 ) -> MediaProcessing:
     """Process asset media (image or video) and record results in MediaProcessing."""
+    fps = sample_fps if sample_fps is not None else 1.0
+    if fps <= 0 or fps > 60:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid sample_fps {fps}. Must be greater than 0 and at most 60.",
+        )
+
     asset = db.query(Asset).filter(Asset.id == asset_id).first()
     if not asset:
         raise HTTPException(
@@ -120,6 +128,20 @@ def process_asset(
         try:
             disk_path = storage_service.get_asset_disk_path(asset.file_path)
             meta = ffmpeg_service.probe_video(disk_path)
+
+            # Extract frames
+            frames_disk_dir = (
+                settings.UPLOAD_DIR / asset.campaign_id / "processed" / asset.id / "frames"
+            )
+            rel_frames_dir = (
+                f"data/campaigns/{asset.campaign_id}/processed/{asset.id}/frames"
+            )
+            extracted_count = ffmpeg_service.extract_video_frames(
+                video_path=disk_path,
+                output_dir=frames_disk_dir,
+                sample_fps=fps,
+            )
+
             update_processing_record(
                 db=db,
                 processing=processing,
@@ -130,6 +152,8 @@ def process_asset(
                     duration_ms=meta["duration_ms"],
                     frame_rate=meta["frame_rate"],
                     total_frames=meta["total_frames"],
+                    frames_extracted=extracted_count,
+                    frame_directory=rel_frames_dir,
                     format=meta["codec"],
                     error_message=None,
                 ),
@@ -145,4 +169,5 @@ def process_asset(
             )
 
     return processing
+
 
