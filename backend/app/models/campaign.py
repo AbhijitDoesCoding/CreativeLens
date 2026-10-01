@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, DateTime
+from sqlalchemy.orm import relationship
 from app.db.session import Base
 
 class Campaign(Base):
@@ -19,3 +20,11 @@ class Campaign(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    assets = relationship(
+        "Asset",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+        order_by="Asset.created_at.desc()",
+    )
+

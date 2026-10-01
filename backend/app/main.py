@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import health, campaigns
+from app.routers import health, campaigns, assets
 from app.core.config import settings
 from app.db.session import Base, engine
 
@@ -25,4 +25,6 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router)
 app.include_router(campaigns.router)
+app.include_router(assets.router)
+
 
