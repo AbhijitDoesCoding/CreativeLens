@@ -1,3 +1,4 @@
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,6 +102,22 @@ def process_asset(
     if processing.status == "completed" and not force:
         return processing
 
+    # Prevent concurrent duplicate processing requests
+    if processing.status == "processing" and not force:
+        return processing
+
+    disk_path = storage_service.get_asset_disk_path(asset.file_path)
+    if not disk_path.is_file():
+        update_processing_record(
+            db=db,
+            processing=processing,
+            update_data=MediaProcessingUpdate(
+                status="failed",
+                error_message=f"Media file not found on disk: {disk_path.name}",
+            ),
+        )
+        return processing
+
     if asset.media_type == "image":
         update_processing_record(
             db=db,
@@ -108,7 +125,6 @@ def process_asset(
             update_data=MediaProcessingUpdate(status="processing"),
         )
         try:
-            disk_path = storage_service.get_asset_disk_path(asset.file_path)
             meta = image_processor.process_image(disk_path)
             update_processing_record(
                 db=db,
@@ -137,16 +153,14 @@ def process_asset(
             processing=processing,
             update_data=MediaProcessingUpdate(status="processing"),
         )
+        frames_disk_dir = (
+            settings.UPLOAD_DIR / asset.campaign_id / "processed" / asset.id / "frames"
+        )
+        rel_frames_dir = (
+            f"data/campaigns/{asset.campaign_id}/processed/{asset.id}/frames"
+        )
         try:
-            disk_path = storage_service.get_asset_disk_path(asset.file_path)
             meta = ffmpeg_service.probe_video(disk_path)
-
-            frames_disk_dir = (
-                settings.UPLOAD_DIR / asset.campaign_id / "processed" / asset.id / "frames"
-            )
-            rel_frames_dir = (
-                f"data/campaigns/{asset.campaign_id}/processed/{asset.id}/frames"
-            )
             extracted_count = ffmpeg_service.extract_video_frames(
                 video_path=disk_path,
                 output_dir=frames_disk_dir,
@@ -170,14 +184,35 @@ def process_asset(
                 ),
             )
         except Exception as e:
+            # Clean up partial artifacts on failure
+            if frames_disk_dir.exists():
+                shutil.rmtree(frames_disk_dir, ignore_errors=True)
+            processed_parent = frames_disk_dir.parent
+            if processed_parent.exists() and not any(processed_parent.iterdir()):
+                try:
+                    processed_parent.rmdir()
+                except OSError:
+                    pass
+
             update_processing_record(
                 db=db,
                 processing=processing,
                 update_data=MediaProcessingUpdate(
                     status="failed",
+                    frames_extracted=0,
+                    frame_directory=None,
                     error_message=str(e),
                 ),
             )
+    else:
+        update_processing_record(
+            db=db,
+            processing=processing,
+            update_data=MediaProcessingUpdate(
+                status="failed",
+                error_message=f"Unsupported media type '{asset.media_type}' for processing",
+            ),
+        )
 
     return processing
 

@@ -41,5 +41,5 @@ def process_image(file_path: Path) -> Dict[str, Any]:
             "color_mode": color_mode,
             "file_size": file_size,
         }
-    except (UnidentifiedImageError, SyntaxError, OSError, ValueError) as e:
+    except Exception as e:
         raise ValueError(f"Corrupt or invalid image file: {str(e)}")

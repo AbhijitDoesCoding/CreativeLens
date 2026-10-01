@@ -70,6 +70,9 @@ def probe_video(file_path: Path) -> Dict[str, Any]:
     if not file_path.is_file():
         raise FileNotFoundError(f"Video file not found: {file_path}")
 
+    if file_path.stat().st_size == 0:
+        raise VideoProcessingError("Video file is empty (0 bytes)")
+
     ffprobe_bin = get_binary_path("ffprobe")
     if not ffprobe_bin:
         raise FFmpegNotFoundError(
@@ -121,6 +124,14 @@ def probe_video(file_path: Path) -> Dict[str, Any]:
     if not width or not height:
         raise VideoProcessingError("Invalid video stream dimensions")
 
+    try:
+        width_val = int(width)
+        height_val = int(height)
+        if width_val <= 0 or height_val <= 0:
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise VideoProcessingError("Invalid video stream dimensions")
+
     # Frame rate
     fps = parse_frame_rate(video_stream.get("r_frame_rate")) or 30.0
 
@@ -144,8 +155,8 @@ def probe_video(file_path: Path) -> Dict[str, Any]:
         total_frames = max(1, int(round(duration_sec * fps)))
 
     return {
-        "width": int(width),
-        "height": int(height),
+        "width": width_val,
+        "height": height_val,
         "duration_ms": duration_ms,
         "frame_rate": float(fps),
         "total_frames": total_frames,
@@ -169,6 +180,9 @@ def extract_video_frames(
     """
     if not video_path.is_file():
         raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    if video_path.stat().st_size == 0:
+        raise VideoProcessingError("Video file is empty (0 bytes)")
 
     if sample_fps <= 0 or sample_fps > 60:
         raise VideoProcessingError(
@@ -207,11 +221,17 @@ def extract_video_frames(
             check=False,
         )
     except subprocess.TimeoutExpired:
+        for partial_frame in output_dir.glob("frame_*.jpg"):
+            partial_frame.unlink(missing_ok=True)
         raise VideoProcessingError("Video frame extraction timed out")
     except Exception as e:
+        for partial_frame in output_dir.glob("frame_*.jpg"):
+            partial_frame.unlink(missing_ok=True)
         raise VideoProcessingError(f"Failed to execute ffmpeg frame extraction: {str(e)}")
 
     if result.returncode != 0:
+        for partial_frame in output_dir.glob("frame_*.jpg"):
+            partial_frame.unlink(missing_ok=True)
         raise VideoProcessingError(
             "Failed to extract frames: malformed or unreadable video"
         )
