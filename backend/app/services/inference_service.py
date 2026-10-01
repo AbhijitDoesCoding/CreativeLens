@@ -104,6 +104,11 @@ def run_asset_inference(
             image_path=str(disk_path),
             prompt=prompt,
             configuration=model.configuration_json,
+            metadata={
+                "asset_id": asset.id,
+                "filename": asset.filename,
+                "media_type": asset.media_type,
+            },
         )
     elif asset.media_type == "video":
         processing = media_processing_service.get_processing_by_asset_id(db, asset_id)
@@ -133,6 +138,12 @@ def run_asset_inference(
             frame_paths=frame_disk_paths,
             prompt=prompt,
             configuration=model.configuration_json,
+            metadata={
+                "asset_id": asset.id,
+                "filename": asset.filename,
+                "media_type": asset.media_type,
+                "frame_count": len(frame_disk_paths),
+            },
         )
     else:
         raise HTTPException(

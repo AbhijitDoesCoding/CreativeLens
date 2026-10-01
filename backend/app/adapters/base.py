@@ -16,6 +16,7 @@ class ModelRequest(BaseModel):
     frame_paths: Optional[List[str]] = None
     prompt: Optional[str] = None
     configuration: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(extra="ignore")
 

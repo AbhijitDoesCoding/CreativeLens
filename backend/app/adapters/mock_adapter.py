@@ -1,4 +1,6 @@
+import os
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 from app.adapters.base import ModelAdapter, ModelContext, ModelRequest, ModelResponse
 
@@ -22,31 +24,82 @@ class MockModelAdapter(ModelAdapter):
         self.fixed_text = fixed_text
         self.fixed_context = fixed_context
 
+    def _detect_marketing_context(self, request: ModelRequest) -> Dict[str, str]:
+        if self.fixed_context:
+            return dict(self.fixed_context)
+
+        # Determine target name from metadata or file paths
+        meta = request.metadata or {}
+        raw_name = (
+            meta.get("original_filename")
+            or meta.get("filename")
+            or (Path(request.image_path).name if request.image_path else "")
+            or (Path(request.frame_paths[0]).name if request.frame_paths else "")
+        )
+        stem = Path(raw_name).stem.lower().replace("-", " ").replace("_", " ")
+
+        if "nike" in stem:
+            brand = "Nike"
+            product = "Air Max Pro"
+            offer = "Free Express Shipping"
+            cta = "Just Do It"
+        elif "apple" in stem or "iphone" in stem:
+            brand = "Apple"
+            product = "iPhone 15 Pro"
+            offer = "Trade in and Save"
+            cta = "Buy Now"
+        elif "samsung" in stem or "galaxy" in stem:
+            brand = "Samsung"
+            product = "Galaxy S24"
+            offer = "Double Your Storage"
+            cta = "Pre-Order"
+        elif "coke" in stem or "coca" in stem:
+            brand = "Coca-Cola"
+            product = "Zero Sugar"
+            offer = "Share an Ice Cold Coke"
+            cta = "Open Happiness"
+        else:
+            brand = "Colgate"
+            product = "Pure Gold SBW"
+            offer = "20% Off Limited Time"
+            cta = "Shop Now"
+
+        if request.frame_paths:
+            num_frames = len(request.frame_paths)
+            summary = f"Video marketing narrative sampled across {num_frames} keyframes with strong brand visibility."
+        else:
+            summary = f"Image marketing creative showcasing brand promo with call to action."
+
+        return {
+            "brand": brand,
+            "product": product,
+            "offer": offer,
+            "cta": cta,
+            "summary": summary,
+        }
+
     def run(self, request: ModelRequest) -> ModelResponse:
         start_time = time.perf_counter()
 
         if self.should_fail:
             raise RuntimeError(f"Mock model [{self.model_key}] simulated provider failure")
 
-        # Determine media type and generate contextual mock text
-        if request.image_path:
-            text = self.fixed_text or "Brand Campaign: Pure Gold Colgate SBW. 20% Off Limited Time."
-            summary = "Image marketing creative showcasing brand promo with call to action."
+        if self.simulated_latency_ms > 0:
+            # Small non-blocking sleep (max 20ms) so tests stay fast while simulating realistic passage of time
+            time.sleep(min(self.simulated_latency_ms / 1000.0, 0.02))
+
+        context_dict = self._detect_marketing_context(request)
+
+        # Generate detected text based on media type & context
+        if self.fixed_text:
+            text = self.fixed_text
+        elif request.image_path:
+            text = f"Brand Campaign: {context_dict['brand']} {context_dict['product']}. {context_dict['offer']}."
         elif request.frame_paths:
             num_frames = len(request.frame_paths)
-            text = self.fixed_text or f"Video Commercial: Pure Gold Colgate SBW. Sequence across {num_frames} frames. Shop Now."
-            summary = f"Video marketing narrative sampled across {num_frames} keyframes with strong brand visibility."
+            text = f"Video Commercial: {context_dict['brand']} {context_dict['product']}. Sequence across {num_frames} frames. {context_dict['cta']}."
         else:
-            text = self.fixed_text or "General marketing creative copy."
-            summary = "Marketing creative with text overlay."
-
-        context_data = self.fixed_context or {
-            "brand": "Colgate",
-            "product": "Pure Gold SBW",
-            "offer": "20% Off",
-            "cta": "Shop Now",
-            "summary": summary,
-        }
+            text = f"{context_dict['brand']} {context_dict['product']} Creative Promo."
 
         # Token calculation heuristic
         input_tokens = len(text.split()) * 25 + (len(request.frame_paths or []) * 120 if request.frame_paths else 150)
@@ -58,7 +111,7 @@ class MockModelAdapter(ModelAdapter):
 
         return ModelResponse(
             text=text,
-            context=ModelContext(**context_data),
+            context=ModelContext(**context_dict),
             latency_ms=total_latency_ms,
             ttft_ms=int(total_latency_ms * 0.4),
             input_tokens=input_tokens,
