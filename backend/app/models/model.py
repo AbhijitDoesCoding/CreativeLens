@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, JSON, String
+from sqlalchemy.orm import relationship
 from app.db.session import Base
 
 class Model(Base):
@@ -26,3 +27,11 @@ class Model(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    inference_runs = relationship(
+        "InferenceRun",
+        back_populates="model",
+        cascade="all, delete-orphan",
+        order_by="InferenceRun.created_at.desc()",
+    )
+

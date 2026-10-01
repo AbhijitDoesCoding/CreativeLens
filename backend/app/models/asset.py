@@ -32,4 +32,11 @@ class Asset(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    inference_runs = relationship(
+        "InferenceRun",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        order_by="InferenceRun.created_at.desc()",
+    )
+
 
