@@ -78,3 +78,51 @@ def test_get_nonexistent_asset(client):
     res = client.get("/assets/00000000-0000-0000-0000-000000000000")
     assert res.status_code == 404
     assert "not found" in res.json()["detail"].lower()
+
+def test_get_asset_file_content(client):
+    import io
+    # Create campaign and upload image
+    camp_res = client.post("/campaigns", json={"name": "Preview Test Campaign"})
+    campaign_id = camp_res.json()["id"]
+
+    img_bytes = b"\x89PNG\r\n\x1a\npreview_test_content"
+    up_res = client.post(
+        f"/campaigns/{campaign_id}/assets",
+        files={"file": ("test_preview.png", io.BytesIO(img_bytes), "image/png")},
+    )
+    assert up_res.status_code == 201
+    asset_id = up_res.json()["id"]
+
+    # Retrieve file
+    file_res = client.get(f"/assets/{asset_id}/file")
+    assert file_res.status_code == 200
+    assert file_res.headers["content-type"].startswith("image/png")
+    assert file_res.content == img_bytes
+
+def test_get_asset_file_nonexistent_asset(client):
+    res = client.get("/assets/00000000-0000-0000-0000-000000000000/file")
+    assert res.status_code == 404
+
+def test_get_asset_file_missing_on_disk(client, db_session):
+    # Campaign exists and DB record exists, but file on disk is missing
+    camp = Campaign(name="Missing Disk File Campaign")
+    db_session.add(camp)
+    db_session.commit()
+    db_session.refresh(camp)
+
+    missing_asset = Asset(
+        campaign_id=camp.id,
+        filename="ghost.png",
+        file_path="data/campaigns/ghost/assets/nonexistent_ghost.png",
+        media_type="image",
+        mime_type="image/png",
+        file_size=100,
+    )
+    db_session.add(missing_asset)
+    db_session.commit()
+    db_session.refresh(missing_asset)
+
+    res = client.get(f"/assets/{missing_asset.id}/file")
+    assert res.status_code == 404
+    assert "not found on disk" in res.json()["detail"].lower()
+

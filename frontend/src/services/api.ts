@@ -76,3 +76,8 @@ export async function uploadCampaignAsset(campaignId: string, file: File): Promi
   }
   return response.json();
 }
+
+export function getAssetFileUrl(assetId: string): string {
+  return `${API_BASE_URL}/assets/${assetId}/file`;
+}
+

@@ -73,3 +73,13 @@ def save_uploaded_file(
 
     rel_path = f"data/campaigns/{campaign_id}/assets/{dest_filename}"
     return safe_filename, rel_path, media_type, mime_type, file_size
+
+def get_asset_disk_path(file_path: str) -> Path:
+    """Resolve the relative asset file path to the absolute disk path."""
+    if file_path.startswith("data/campaigns/"):
+        rel_under_campaigns = file_path[len("data/campaigns/"):]
+        candidate = settings.UPLOAD_DIR / rel_under_campaigns
+        if candidate.is_file():
+            return candidate
+    return (settings.BASE_DIR / file_path).resolve()
+
