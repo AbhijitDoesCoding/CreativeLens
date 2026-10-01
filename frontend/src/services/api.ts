@@ -1,4 +1,10 @@
-import type { Asset, Campaign, HealthStatus } from '../types';
+import type {
+  Asset,
+  AssetFramesResponse,
+  Campaign,
+  HealthStatus,
+  MediaProcessing,
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -81,3 +87,47 @@ export function getAssetFileUrl(assetId: string): string {
   return `${API_BASE_URL}/assets/${assetId}/file`;
 }
 
+export async function processAsset(
+  assetId: string,
+  sampleFps: number = 1.0,
+  force: boolean = false
+): Promise<MediaProcessing> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/process`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sample_fps: sampleFps, force }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Processing failed (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function getAssetProcessing(assetId: string): Promise<MediaProcessing | null> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/processing`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch processing status (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function getAssetFrames(assetId: string): Promise<AssetFramesResponse> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/frames`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch asset frames (${response.status})`);
+  }
+  return response.json();
+}
+
+export function getFrameUrl(assetId: string, frameFilename: string): string {
+  return `${API_BASE_URL}/assets/${assetId}/frames/${frameFilename}`;
+}

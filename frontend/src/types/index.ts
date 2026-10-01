@@ -26,3 +26,38 @@ export interface Asset {
 export interface CreateCampaignInput {
   name: string;
 }
+
+export type ProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface MediaProcessing {
+  id: string;
+  asset_id: string;
+  media_type: MediaType;
+  status: ProcessingStatus;
+  width?: number | null;
+  height?: number | null;
+  format?: string | null;
+  color_mode?: string | null;
+  duration_ms?: number | null;
+  frame_rate?: number | null;
+  total_frames?: number | null;
+  frames_extracted?: number | null;
+  frame_directory?: string | null;
+  processed_at?: string | null;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FrameInfo {
+  frame_number: number;
+  filename: string;
+  url: string;
+}
+
+export interface AssetFramesResponse {
+  asset_id: string;
+  total_frames: number;
+  frame_directory?: string | null;
+  frames: FrameInfo[];
+}

@@ -1,6 +1,12 @@
-import { useRef, useState, type ChangeEvent } from 'react';
-import type { Asset, Campaign } from '../types';
-import { getAssetFileUrl } from '../services/api';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import type { Asset, Campaign, FrameInfo, MediaProcessing } from '../types';
+import {
+  getAssetFileUrl,
+  getAssetFrames,
+  getAssetProcessing,
+  getFrameUrl,
+  processAsset,
+} from '../services/api';
 
 interface CampaignDetailsProps {
   campaign: Campaign;
@@ -16,6 +22,12 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export function formatDuration(durationMs?: number | null): string {
+  if (!durationMs) return '0s';
+  const sec = (durationMs / 1000).toFixed(1);
+  return `${sec}s`;
+}
+
 export function CampaignDetails({
   campaign,
   assets,
@@ -28,12 +40,52 @@ export function CampaignDetails({
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [previewModalAsset, setPreviewModalAsset] = useState<Asset | null>(null);
+  const [previewModalItem, setPreviewModalItem] = useState<{
+    title: string;
+    mediaType: 'image' | 'video';
+    url: string;
+    details?: string;
+  } | null>(null);
+
+  // Media Processing states
+  const [processingMap, setProcessingMap] = useState<Record<string, MediaProcessing>>({});
+  const [processingLoading, setProcessingLoading] = useState<Record<string, boolean>>({});
+  const [videoFramesMap, setVideoFramesMap] = useState<Record<string, FrameInfo[]>>({});
+  const [expandedGallery, setExpandedGallery] = useState<Record<string, boolean>>({});
+
+  // Fetch processing status for assets on load
+  useEffect(() => {
+    if (assets.length === 0) return;
+
+    let isMounted = true;
+    assets.forEach((asset) => {
+      getAssetProcessing(asset.id)
+        .then((record) => {
+          if (isMounted && record) {
+            setProcessingMap((prev) => ({ ...prev, [asset.id]: record }));
+            if (record.media_type === 'video' && record.status === 'completed') {
+              getAssetFrames(asset.id)
+                .then((res) => {
+                  if (isMounted) {
+                    setVideoFramesMap((prev) => ({ ...prev, [asset.id]: res.frames }));
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+        })
+        .catch(() => {});
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [assets]);
 
   const handleFilesSelected = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const fileList = Array.from(e.target.files);
-    e.target.value = ''; // Reset input to allow re-uploading same file
+    e.target.value = '';
 
     try {
       setUploading(true);
@@ -50,6 +102,35 @@ export function CampaignDetails({
       setUploading(false);
       setUploadProgress(null);
     }
+  };
+
+  const handleProcessAsset = async (asset: Asset, force: boolean = false) => {
+    try {
+      setProcessingLoading((prev) => ({ ...prev, [asset.id]: true }));
+      setError(null);
+
+      const result = await processAsset(asset.id, 1.0, force);
+      setProcessingMap((prev) => ({ ...prev, [asset.id]: result }));
+
+      // If video, also fetch extracted frames
+      if (result.media_type === 'video' && result.status === 'completed') {
+        const framesRes = await getAssetFrames(asset.id);
+        setVideoFramesMap((prev) => ({ ...prev, [asset.id]: framesRes.frames }));
+        setExpandedGallery((prev) => ({ ...prev, [asset.id]: true }));
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(`Processing failed: ${err.message}`);
+      } else {
+        setError('Failed to process asset');
+      }
+    } finally {
+      setProcessingLoading((prev) => ({ ...prev, [asset.id]: false }));
+    }
+  };
+
+  const toggleGallery = (assetId: string) => {
+    setExpandedGallery((prev) => ({ ...prev, [assetId]: !prev[assetId] }));
   };
 
   return (
@@ -142,63 +223,201 @@ export function CampaignDetails({
         </div>
       ) : viewMode === 'grid' ? (
         <div className="asset-grid">
-          {assets.map((asset) => (
-            <div key={asset.id} className="card asset-card">
-              <div className="asset-preview-container">
-                {asset.media_type === 'image' ? (
-                  <div
-                    className="image-wrapper"
-                    onClick={() => setPreviewModalAsset(asset)}
-                    title="Click to expand"
-                  >
-                    <img
-                      src={getAssetFileUrl(asset.id)}
-                      alt={asset.filename}
-                      className="asset-thumbnail"
-                      loading="lazy"
-                    />
-                  </div>
-                ) : (
-                  <div className="video-wrapper">
-                    <video
-                      src={getAssetFileUrl(asset.id)}
-                      controls
-                      preload="metadata"
-                      playsInline
-                      className="asset-video-element"
-                    />
-                  </div>
-                )}
-              </div>
+          {assets.map((asset) => {
+            const proc = processingMap[asset.id];
+            const isProcessing = processingLoading[asset.id];
+            const frames = videoFramesMap[asset.id] || [];
+            const isGalleryOpen = !!expandedGallery[asset.id];
 
-              <div className="asset-info">
-                <div className="asset-title-row">
-                  <span className="asset-filename" title={asset.filename}>
-                    {asset.filename}
-                  </span>
-                  <span
-                    className={`badge ${
-                      asset.media_type === 'image' ? 'badge-image' : 'badge-video'
-                    }`}
-                  >
-                    {asset.media_type}
-                  </span>
+            return (
+              <div key={asset.id} className="card asset-card">
+                <div className="asset-preview-container">
+                  {asset.media_type === 'image' ? (
+                    <div
+                      className="image-wrapper"
+                      onClick={() =>
+                        setPreviewModalItem({
+                          title: asset.filename,
+                          mediaType: 'image',
+                          url: getAssetFileUrl(asset.id),
+                          details: `${formatFileSize(asset.file_size)} • ${
+                            proc?.width && proc?.height ? `${proc.width}×${proc.height}` : ''
+                          }`,
+                        })
+                      }
+                      title="Click to view full image"
+                    >
+                      <img
+                        src={getAssetFileUrl(asset.id)}
+                        alt={asset.filename}
+                        className="asset-thumbnail"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : (
+                    <div className="video-wrapper">
+                      <video
+                        src={getAssetFileUrl(asset.id)}
+                        controls
+                        preload="metadata"
+                        playsInline
+                        className="asset-video-element"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                <div className="asset-meta-row">
-                  <span>{formatFileSize(asset.file_size)}</span>
-                  <span>&bull;</span>
-                  <span>
-                    {new Date(asset.created_at).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </span>
+                <div className="asset-info">
+                  <div className="asset-title-row">
+                    <span className="asset-filename" title={asset.filename}>
+                      {asset.filename}
+                    </span>
+                    <span
+                      className={`badge ${
+                        asset.media_type === 'image' ? 'badge-image' : 'badge-video'
+                      }`}
+                    >
+                      {asset.media_type}
+                    </span>
+                  </div>
+
+                  <div className="asset-meta-row">
+                    <span>{formatFileSize(asset.file_size)}</span>
+                    <span>&bull;</span>
+                    <span>
+                      {new Date(asset.created_at).toLocaleDateString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </span>
+                  </div>
+
+                  {/* Processing Status & Metadata Section */}
+                  <div className="processing-section">
+                    <div className="processing-status-row">
+                      <span className="processing-label">Status:</span>
+                      <span
+                        className={`badge badge-status ${
+                          isProcessing
+                            ? 'badge-processing'
+                            : proc?.status === 'completed'
+                            ? 'badge-completed'
+                            : proc?.status === 'failed'
+                            ? 'badge-failed'
+                            : 'badge-pending'
+                        }`}
+                      >
+                        {isProcessing ? 'processing...' : proc?.status || 'unprocessed'}
+                      </span>
+
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-process"
+                        onClick={() => handleProcessAsset(asset, !!proc)}
+                        disabled={isProcessing}
+                      >
+                        {isProcessing
+                          ? 'Processing...'
+                          : proc?.status === 'completed'
+                          ? 'Re-process'
+                          : 'Process'}
+                      </button>
+                    </div>
+
+                    {/* Metadata details */}
+                    {proc?.status === 'completed' && (
+                      <div className="metadata-badge-list">
+                        {asset.media_type === 'image' && (
+                          <>
+                            {proc.width && proc.height && (
+                              <span className="meta-pill">
+                                {proc.width} × {proc.height}
+                              </span>
+                            )}
+                            {proc.format && <span className="meta-pill">{proc.format}</span>}
+                          </>
+                        )}
+
+                        {asset.media_type === 'video' && (
+                          <>
+                            {proc.width && proc.height && (
+                              <span className="meta-pill">
+                                {proc.width} × {proc.height}
+                              </span>
+                            )}
+                            {proc.duration_ms && (
+                              <span className="meta-pill">
+                                {formatDuration(proc.duration_ms)}
+                              </span>
+                            )}
+                            {proc.frame_rate && (
+                              <span className="meta-pill">{proc.frame_rate} fps</span>
+                            )}
+                            {proc.frames_extracted !== null &&
+                              proc.frames_extracted !== undefined && (
+                                <span className="meta-pill">
+                                  {proc.frames_extracted} frames
+                                </span>
+                              )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {proc?.status === 'failed' && (
+                      <p className="processing-error-text">
+                        Error: {proc.error_message || 'Processing failed'}
+                      </p>
+                    )}
+
+                    {/* Extracted frames gallery toggle for videos */}
+                    {asset.media_type === 'video' &&
+                      proc?.status === 'completed' &&
+                      frames.length > 0 && (
+                        <div className="frames-gallery-wrapper">
+                          <button
+                            type="button"
+                            className="btn-link gallery-toggle-btn"
+                            onClick={() => toggleGallery(asset.id)}
+                          >
+                            {isGalleryOpen ? '▲ Hide Frames' : `▼ View Extracted Frames (${frames.length})`}
+                          </button>
+
+                          {isGalleryOpen && (
+                            <div className="frames-strip">
+                              {frames.map((frame) => (
+                                <div
+                                  key={frame.filename}
+                                  className="frame-strip-item"
+                                  onClick={() =>
+                                    setPreviewModalItem({
+                                      title: `${asset.filename} — Frame #${frame.frame_number}`,
+                                      mediaType: 'image',
+                                      url: getFrameUrl(asset.id, frame.filename),
+                                      details: frame.filename,
+                                    })
+                                  }
+                                  title={`Click to view Frame #${frame.frame_number}`}
+                                >
+                                  <img
+                                    src={getFrameUrl(asset.id, frame.filename)}
+                                    alt={frame.filename}
+                                    className="frame-strip-img"
+                                    loading="lazy"
+                                  />
+                                  <span className="frame-strip-number">#{frame.frame_number}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="assets-table-container card">
@@ -208,109 +427,148 @@ export function CampaignDetails({
                 <th style={{ width: '80px' }}>Preview</th>
                 <th>Filename</th>
                 <th>Type</th>
-                <th>Size</th>
-                <th>Upload Date</th>
+                <th>Metadata</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {assets.map((asset) => (
-                <tr key={asset.id}>
-                  <td className="table-preview-cell">
-                    {asset.media_type === 'image' ? (
-                      <img
-                        src={getAssetFileUrl(asset.id)}
-                        alt={asset.filename}
-                        className="table-thumbnail"
-                        onClick={() => setPreviewModalAsset(asset)}
-                      />
-                    ) : (
-                      <video
-                        src={getAssetFileUrl(asset.id)}
-                        preload="metadata"
-                        className="table-video-thumb"
-                        onClick={() => setPreviewModalAsset(asset)}
-                      />
-                    )}
-                  </td>
-                  <td className="asset-filename">
-                    <strong>{asset.filename}</strong>
-                  </td>
-                  <td>
-                    <span
-                      className={`badge ${
-                        asset.media_type === 'image' ? 'badge-image' : 'badge-video'
-                      }`}
-                    >
-                      {asset.media_type}
-                    </span>
-                  </td>
-                  <td className="asset-size">{formatFileSize(asset.file_size)}</td>
-                  <td className="asset-date">
-                    {new Date(asset.created_at).toLocaleString(undefined, {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </td>
-                </tr>
-              ))}
+              {assets.map((asset) => {
+                const proc = processingMap[asset.id];
+                const isProcessing = processingLoading[asset.id];
+
+                return (
+                  <tr key={asset.id}>
+                    <td className="table-preview-cell">
+                      {asset.media_type === 'image' ? (
+                        <img
+                          src={getAssetFileUrl(asset.id)}
+                          alt={asset.filename}
+                          className="table-thumbnail"
+                          onClick={() =>
+                            setPreviewModalItem({
+                              title: asset.filename,
+                              mediaType: 'image',
+                              url: getAssetFileUrl(asset.id),
+                            })
+                          }
+                        />
+                      ) : (
+                        <video
+                          src={getAssetFileUrl(asset.id)}
+                          preload="metadata"
+                          className="table-video-thumb"
+                          onClick={() =>
+                            setPreviewModalItem({
+                              title: asset.filename,
+                              mediaType: 'video',
+                              url: getAssetFileUrl(asset.id),
+                            })
+                          }
+                        />
+                      )}
+                    </td>
+                    <td className="asset-filename">
+                      <strong>{asset.filename}</strong>
+                      <div className="asset-size">{formatFileSize(asset.file_size)}</div>
+                    </td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          asset.media_type === 'image' ? 'badge-image' : 'badge-video'
+                        }`}
+                      >
+                        {asset.media_type}
+                      </span>
+                    </td>
+                    <td>
+                      {proc?.status === 'completed' ? (
+                        <div className="table-meta">
+                          {proc.width && proc.height && (
+                            <div>
+                              {proc.width} × {proc.height}
+                            </div>
+                          )}
+                          {proc.format && <div>Format: {proc.format}</div>}
+                          {proc.duration_ms && (
+                            <div>Duration: {formatDuration(proc.duration_ms)}</div>
+                          )}
+                          {proc.frames_extracted !== null && proc.frames_extracted !== undefined && (
+                            <div>Frames: {proc.frames_extracted}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <span
+                        className={`badge badge-status ${
+                          isProcessing
+                            ? 'badge-processing'
+                            : proc?.status === 'completed'
+                            ? 'badge-completed'
+                            : proc?.status === 'failed'
+                            ? 'badge-failed'
+                            : 'badge-pending'
+                        }`}
+                      >
+                        {isProcessing ? 'processing...' : proc?.status || 'unprocessed'}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => handleProcessAsset(asset, !!proc)}
+                        disabled={isProcessing}
+                      >
+                        {isProcessing ? '...' : proc?.status === 'completed' ? 'Re-process' : 'Process'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
       {/* Modal preview dialog */}
-      {previewModalAsset && (
-        <div className="modal-backdrop" onClick={() => setPreviewModalAsset(null)}>
+      {previewModalItem && (
+        <div className="modal-backdrop" onClick={() => setPreviewModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{previewModalAsset.filename}</h3>
+              <h3>{previewModalItem.title}</h3>
               <button
                 type="button"
                 className="modal-close"
-                onClick={() => setPreviewModalAsset(null)}
+                onClick={() => setPreviewModalItem(null)}
               >
                 &times;
               </button>
             </div>
             <div className="modal-body">
-              {previewModalAsset.media_type === 'image' ? (
+              {previewModalItem.mediaType === 'image' ? (
                 <img
-                  src={getAssetFileUrl(previewModalAsset.id)}
-                  alt={previewModalAsset.filename}
+                  src={previewModalItem.url}
+                  alt={previewModalItem.title}
                   className="modal-image"
                 />
               ) : (
                 <video
-                  src={getAssetFileUrl(previewModalAsset.id)}
+                  src={previewModalItem.url}
                   controls
                   autoPlay
                   className="modal-video"
                 />
               )}
             </div>
-            <div className="modal-footer">
-              <span
-                className={`badge ${
-                  previewModalAsset.media_type === 'image' ? 'badge-image' : 'badge-video'
-                }`}
-              >
-                {previewModalAsset.media_type}
-              </span>
-              <span>{formatFileSize(previewModalAsset.file_size)}</span>
-              <span>
-                Uploaded on{' '}
-                {new Date(previewModalAsset.created_at).toLocaleString(undefined, {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
-            </div>
+            {previewModalItem.details && (
+              <div className="modal-footer">
+                <span>{previewModalItem.details}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
