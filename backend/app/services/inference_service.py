@@ -113,6 +113,9 @@ def run_asset_inference(
             },
         )
     elif asset.media_type == "video":
+        video_disk_path = storage_service.get_asset_disk_path(asset.file_path)
+        video_path_str = str(video_disk_path) if video_disk_path.is_file() else None
+
         processing = media_processing_service.get_processing_by_asset_id(db, asset_id)
         if not processing or processing.status != "completed":
             raise HTTPException(
@@ -137,6 +140,7 @@ def run_asset_inference(
             frame_disk_paths.append(str(f_path))
 
         model_request = ModelRequest(
+            video_path=video_path_str,
             frame_paths=frame_disk_paths,
             prompt=prompt,
             configuration=model.configuration_json,

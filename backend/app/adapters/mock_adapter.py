@@ -47,6 +47,7 @@ class MockModelAdapter(ModelAdapter):
             meta.get("original_filename")
             or meta.get("filename")
             or (Path(request.image_path).name if request.image_path else "")
+            or (Path(request.video_path).name if request.video_path else "")
             or (Path(request.frame_paths[0]).name if request.frame_paths else "")
         )
         stem = Path(raw_name).stem.lower().replace("-", " ").replace("_", " ")
@@ -80,6 +81,8 @@ class MockModelAdapter(ModelAdapter):
         if request.frame_paths:
             num_frames = len(request.frame_paths)
             summary = f"Video marketing narrative sampled across {num_frames} keyframes with strong brand visibility."
+        elif request.video_path:
+            summary = f"Video marketing narrative evaluated from native video with strong brand visibility."
         else:
             summary = f"Image marketing creative showcasing brand promo with call to action."
 
@@ -123,11 +126,13 @@ class MockModelAdapter(ModelAdapter):
         # Generate detected text based on media type & context
         if self.fixed_text:
             text = self.fixed_text
-        elif request.image_path:
-            text = f"Brand Campaign: {context_dict['brand']} {context_dict['product']}. {context_dict['offer']}."
         elif request.frame_paths:
             num_frames = len(request.frame_paths)
             text = f"Video Commercial: {context_dict['brand']} {context_dict['product']}. Sequence across {num_frames} frames. {context_dict['cta']}."
+        elif request.video_path:
+            text = f"Video Commercial: {context_dict['brand']} {context_dict['product']}. Native video evaluation. {context_dict['cta']}."
+        elif request.image_path:
+            text = f"Brand Campaign: {context_dict['brand']} {context_dict['product']}. {context_dict['offer']}."
         else:
             text = f"{context_dict['brand']} {context_dict['product']} Creative Promo."
 

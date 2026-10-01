@@ -13,6 +13,7 @@ class ModelContext(BaseModel):
 
 class ModelRequest(BaseModel):
     image_path: Optional[str] = None
+    video_path: Optional[str] = None
     frame_paths: Optional[List[str]] = None
     prompt: Optional[str] = None
     configuration: Optional[Dict[str, Any]] = None
@@ -24,7 +25,7 @@ class ModelRequest(BaseModel):
     def media_type(self) -> str:
         if self.image_path:
             return "image"
-        if self.frame_paths:
+        if self.video_path or self.frame_paths:
             return "video"
         return "unknown"
 
@@ -44,6 +45,17 @@ class ModelAdapter(ABC):
     """
     Abstract base class for all AI vision/multimodal model adapters.
     Core inference code must only interact with this interface.
+
+    Media Representation Contract:
+    - For image assets:
+        `image_path` will be provided.
+    - For video assets:
+        `video_path` will be provided when the source video is available.
+        `frame_paths` will be provided when Phase 2 frame processing is complete.
+
+    Adapters may choose whichever representation they support:
+    - Native video models consume `video_path`.
+    - Frame-based vision models consume `frame_paths`.
     """
 
     @abstractmethod
@@ -60,3 +72,4 @@ class ModelAdapter(ABC):
         Default is True.
         """
         return True
+

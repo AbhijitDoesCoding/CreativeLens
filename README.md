@@ -360,7 +360,7 @@ class ModelAdapter(ABC):
 ```
 
 The core pipeline interacts solely through `ModelRequest` and `ModelResponse`:
-* **`ModelRequest`**: Encapsulates `image_path` (for images), `frame_paths` (for sampled video frames), user `prompt`, model `configuration`, and asset `metadata`.
+* **`ModelRequest`**: Encapsulates `image_path` (for images), `video_path` (for native video models), `frame_paths` (for sampled video frames), user `prompt`, model `configuration`, and asset `metadata`.
 * **`ModelResponse`**: Returns normalized OCR `text`, structured `context` (`brand`, `product`, `offer`, `cta`, `summary`), telemetry (`latency_ms`, `ttft_ms`), token counts (`input_tokens`, `output_tokens`), and simulated or calculated `estimated_cost_usd`.
 
 ### Model Registry & Lifecycle
@@ -370,8 +370,14 @@ Models are managed dynamically in SQLite:
 * **Safety Guards**: Attempting inference with a disabled model is rejected with an HTTP 400 Bad Request error. Disabled models are excluded from automated campaign pipeline runs.
 
 ### Image & Video Media Handling
-* **Image Assets**: Passed directly by absolute filesystem path to the model adapter.
-* **Video Assets**: Fed to model adapters as an ordered list of keyframe paths sampled during Phase 2 media processing (`frame_000001.jpg`, `frame_000002.jpg`, etc.). Videos must be processed before inference can be initiated.
+CreativeLens supports both image creatives and video creatives. For video assets, the platform supports two inference modes without requiring changes to the inference pipeline:
+
+* **Image Assets**: Passed directly by absolute filesystem path (`image_path`) to the model adapter.
+* **Video Assets (Dual Representation)**:
+  * **A. Native video inference**: `video_path` is provided pointing directly to the source video file on disk, allowing adapters designed for native video understanding to consume the video file directly.
+  * **B. Frame-based inference**: `frame_paths` is provided containing an ordered list of keyframe paths sampled during media processing (`frame_000001.jpg`, `frame_000002.jpg`, etc.), allowing vision models that accept image frame sequences to evaluate the creative.
+
+Adapters may choose whichever representation they support. When video processing is complete, both `video_path` and `frame_paths` are made available simultaneously in `ModelRequest`.
 
 ### Telemetry & Cost Accounting
 Every inference run tracks comprehensive telemetry stored in `InferenceRun`:
